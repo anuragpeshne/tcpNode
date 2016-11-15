@@ -18,6 +18,7 @@ import java.util.Arrays;
 
 public class Server {
   private static final int PORT = 8080;
+  private static final int MAX_FILE_SIZE = 4096;
   private ConcurrentHashMap<String, Socket> clientMapping;
 
   private class ClientHandler implements Runnable {
@@ -85,9 +86,29 @@ public class Server {
                 blockList = new ArrayList<String>(Arrays.asList(blocks));
               }
 
-              this.broadcast(blockList, req[1].trim());
+              Boolean isFile;
+              String msg;
+              if (req[1].contains("file:")) {
+                isFile = true;
+                msg = req[1].trim().split(": ?", 2)[1];
+              } else {
+                isFile = false;
+                msg = req[1].trim();
+              }
+              this.broadcast(blockList, msg, isFile);
+
             } else if (req[0].startsWith("@")) { //unicast
-              this.unicast(req[0].substring(1).trim(), req[1].trim());
+              Boolean isFile;
+              String msg;
+              if (req[1].contains("file:")) {
+                isFile = true;
+                msg = req[1].trim().split(": ?", 2)[1];
+              } else {
+                isFile = false;
+                msg = req[1].trim();
+              }
+              this.unicast(req[0].substring(1).trim(), msg, isFile);
+
             } else {
               this.warnClient("Invalid Command");
             }
@@ -105,13 +126,13 @@ public class Server {
       }
     }
 
-    private Boolean unicast(String target, String msg) {
+    private Boolean unicast(String target, String msg, Boolean isFile) {
       ArrayList<String> targetWrapper = new ArrayList<String>();
       targetWrapper.add(target);
-      return this.multicast(targetWrapper, msg);
+      return this.multicast(targetWrapper, msg, isFile);
     }
 
-    private Boolean multicast(ArrayList<String> targets, String msg) {
+    private Boolean multicast(ArrayList<String> targets, String msg, Boolean isFile) {
       ArrayList<Socket> targetSocks = this.getClientSocks(targets);
       if (targetSocks.size() == 0) {
         this.out.println("User not found");
@@ -120,9 +141,19 @@ public class Server {
       }
       for (Socket targetSock: targetSocks) {
         try {
-          PrintWriter targetOut = new PrintWriter(targetSock.getOutputStream());
-          targetOut.println(this.username + ": " + msg);
-          targetOut.flush();
+          if (isFile) {
+            byte[] buffer = new byte[MAX_FILE_SIZE];
+            BufferedOutputStream outStream = new BufferedOutputStream(targetSock.getOutputStream());
+            for (int read = this.inBin.read(buffer);
+                 read >= 0;
+                 read = this.inBin.read(buffer)) {
+              outStream.write(buffer, 0, read);
+            }
+          } else {
+            PrintWriter targetOut = new PrintWriter(targetSock.getOutputStream());
+            targetOut.println(this.username + ": " + msg);
+            targetOut.flush();
+          }
         } catch (IOException e) {
           e.printStackTrace();
         }
@@ -133,11 +164,11 @@ public class Server {
     private Boolean broadcast(String msg) {
       ArrayList<String> emptyList = new ArrayList<String>();
       emptyList.add(this.username);
-      return this.broadcast(emptyList, msg);
+      return this.broadcast(emptyList, msg, false);
     }
 
-    private Boolean broadcast(ArrayList<String> negList, String msg) {
-      return this.multicast(this.filterClients(negList), msg);
+    private Boolean broadcast(ArrayList<String> negList, String msg, Boolean isFile) {
+      return this.multicast(this.filterClients(negList), msg, isFile);
     }
 
     private Boolean login(String username) {
@@ -168,7 +199,10 @@ public class Server {
       } else {
         ArrayList<Socket> clientSocks = new ArrayList<Socket>();
         for (String username: usernames) {
-          clientSocks.add(this.clientMapping.get(username));
+          Socket userSock = this.clientMapping.get(username);
+          if (userSock != null) {
+            clientSocks.add(userSock);
+          }
         }
         return clientSocks;
       }
