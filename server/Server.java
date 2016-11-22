@@ -18,7 +18,7 @@ import java.util.Arrays;
 
 public class Server {
   private static final int PORT = 8080;
-  private static final int MAX_FILE_SIZE = 4096;
+  private static final int BUFFER_SIZE = 4096;
   private ConcurrentHashMap<String, Socket> clientMapping;
 
   private class ClientHandler implements Runnable {
@@ -142,7 +142,7 @@ public class Server {
       for (Socket targetSock: targetSocks) {
         try {
           if (isFile) {
-            byte[] buffer = new byte[MAX_FILE_SIZE];
+            byte[] buffer = new byte[BUFFER_SIZE];
             BufferedOutputStream outStream = new BufferedOutputStream(targetSock.getOutputStream());
             for (int read = this.inBin.read(buffer);
                  read >= 0;
