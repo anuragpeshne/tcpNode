@@ -1,8 +1,6 @@
 package server;
 
 import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
@@ -12,7 +10,6 @@ import java.io.BufferedOutputStream;
 import java.io.BufferedInputStream;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.Enumeration;
 import java.util.Arrays;
 
@@ -114,15 +111,24 @@ public class Server {
             }
           }
         }
-        // clean up client here
-        this.clientMapping.remove(this.username);
       } catch (java.net.SocketException e) {
-        this.broadcast(this.username + " dropped");
-        System.out.println(this.username + " dropped");
-
-        this.clientMapping.remove(this.username);
+        e.printStackTrace();
       } catch (IOException e) {
         e.printStackTrace();
+      } finally {
+        // clean up client here
+        this.clientMapping.remove(this.username);
+        this.broadcast(this.username + " dropped");
+        System.out.println(this.username + " dropped");
+        try {
+          this.in.close();
+          this.out.close();
+          this.inBin.close();
+          this.outBin.close();
+          this.sock.close();
+        } catch (IOException e){
+          e.printStackTrace();
+        }
       }
     }
 

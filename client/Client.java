@@ -6,10 +6,10 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
-import java.net.Socket;
 import java.io.BufferedOutputStream;
 import java.io.BufferedInputStream;
 import java.net.UnknownHostException;
+import java.net.Socket;
 
 
 public class Client {
@@ -68,11 +68,12 @@ public class Client {
 
     @Override
     public void run() {
-      System.out.println("Dumper Starter!");
+      System.out.println("Dumper Started!");
       String res;
       try {
         while ((res = in.readLine()) != null) {
           System.out.println(res);
+          System.out.flush();
         }
       } catch (IOException e) {
         e.printStackTrace();
@@ -82,14 +83,23 @@ public class Client {
 
   public void listenInp() {
     String inp = null;
-    BufferedReader stdin = new BufferedReader(new InputStreamReader(System.in));
     try {
-      while ((inp = stdin.readLine()) != null && inp.compareTo("quit") != 0) {
+      while ((inp = System.console().readLine()) != null) {
         this.out.println(inp);
         this.out.flush();
       }
-    } catch (IOException e) {
+    } catch (Exception e) {
       e.printStackTrace();
+    } finally {
+      try {
+        this.in.close();
+        this.out.close();
+        this.binIn.close();
+        this.binOut.close();
+        this.sock.close();
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
     }
   }
 
