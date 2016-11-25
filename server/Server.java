@@ -4,10 +4,10 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
-import java.net.ServerSocket;
-import java.net.Socket;
 import java.io.BufferedOutputStream;
 import java.io.BufferedInputStream;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.ArrayList;
 import java.util.Enumeration;
@@ -148,6 +148,10 @@ public class Server {
       for (Socket targetSock: targetSocks) {
         try {
           if (isFile) {
+            PrintWriter targetOut = new PrintWriter(targetSock.getOutputStream());
+            targetOut.println(this.username + ": file: " + msg);
+            targetOut.flush();
+
             byte[] buffer = new byte[BUFFER_SIZE];
             BufferedOutputStream outStream = new BufferedOutputStream(targetSock.getOutputStream());
             for (int read = this.inBin.read(buffer);
