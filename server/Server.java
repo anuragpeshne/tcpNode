@@ -6,6 +6,7 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.io.BufferedOutputStream;
 import java.io.BufferedInputStream;
+import java.io.File;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.concurrent.ConcurrentHashMap;
@@ -16,27 +17,18 @@ import java.util.Arrays;
 public class Server {
   private static final int PORT = 8080;
   private static final int BUFFER_SIZE = 4096;
-  private ConcurrentHashMap<String, Socket> clientMapping;
+  private ConcurrentHashMap<String, Client> clientMapping;
 
-  private class ClientHandler implements Runnable {
-    BufferedReader in;
-    PrintWriter out;
+  private class Client {
+    public Socket sock;
+    public BufferedInputStream inBin;
+    public BufferedOutputStream outBin;
+    public PrintWriter out;
+    public BufferedReader in;
 
-    BufferedOutputStream outBin;
-    BufferedInputStream inBin;
-
-    Socket sock;
-    Boolean loggedIn;
-    ConcurrentHashMap<String, Socket> clientMapping;
-    String username;
-
-    public ClientHandler(Socket clientSocket,
-                         ConcurrentHashMap<String, Socket> clientMapping) {
-      this.sock = clientSocket;
-      this.loggedIn = false;
-      this.clientMapping = clientMapping;
-
+    public Client(Socket sock) {
       try {
+        this.sock = sock;
         this.in = new BufferedReader(new InputStreamReader(sock.getInputStream()));
         this.out = new PrintWriter(sock.getOutputStream());
 
@@ -45,6 +37,32 @@ public class Server {
       } catch (IOException e) {
         e.printStackTrace();
       }
+    }
+  }
+
+  private class ClientHandler implements Runnable {
+    BufferedReader in;
+    PrintWriter out;
+
+    BufferedOutputStream outBin;
+    BufferedInputStream inBin;
+
+    Client client;
+    Boolean loggedIn;
+    ConcurrentHashMap<String, Client> clientMapping;
+    String username;
+
+    public ClientHandler(Socket sock,
+                         ConcurrentHashMap<String, Client> clientMapping) {
+      this.loggedIn = false;
+      this.clientMapping = clientMapping;
+
+      this.client = new Client(sock);
+
+      this.in = this.client.in;
+      this.out = this.client.out;
+      this.inBin = this.client.inBin;
+      this.outBin = this.client.outBin;
     }
 
     @Override
@@ -80,8 +98,12 @@ public class Server {
 
               if (req[0].length() > 4) { // probably contains blocked users
                 String[] blocks = req[0].substring(4).trim().split("-");
-                blockList = new ArrayList<String>(Arrays.asList(blocks));
+                for (String blockUsername: blocks) {
+                  if (blockUsername.trim().compareTo("") != 0)
+                    blockList.add(blockUsername.trim());
+                }
               }
+              blockList.add(this.username);
 
               Boolean isFile;
               String msg;
@@ -125,7 +147,7 @@ public class Server {
           this.out.close();
           this.inBin.close();
           this.outBin.close();
-          this.sock.close();
+          this.client.sock.close();
         } catch (IOException e){
           e.printStackTrace();
         }
@@ -139,35 +161,53 @@ public class Server {
     }
 
     private Boolean multicast(ArrayList<String> targets, String msg, Boolean isFile) {
-      ArrayList<Socket> targetSocks = this.getClientSocks(targets);
-      if (targetSocks.size() == 0) {
+      ArrayList<Client> targetClients = this.getClients(targets);
+      if (targetClients.size() == 0) {
         this.out.println("User not found");
         this.out.flush();
         return false;
       }
-      for (Socket targetSock: targetSocks) {
-        try {
-          if (isFile) {
-            PrintWriter targetOut = new PrintWriter(targetSock.getOutputStream());
-            targetOut.println(this.username + ": file: " + msg);
-            targetOut.flush();
 
-            byte[] buffer = new byte[BUFFER_SIZE];
-            BufferedOutputStream outStream = new BufferedOutputStream(targetSock.getOutputStream());
-            for (int read = this.inBin.read(buffer);
-                 read >= 0;
-                 read = this.inBin.read(buffer)) {
-              outStream.write(buffer, 0, read);
-            }
-          } else {
-            PrintWriter targetOut = new PrintWriter(targetSock.getOutputStream());
-            targetOut.println(this.username + ": " + msg);
-            targetOut.flush();
+      try {
+        if (isFile) {
+          System.out.println("File detected");
+          /* here msg looks /path/to/file, length: \d+ */
+          int fileLen = Integer.parseInt(msg.split(", ?")[1].split(":")[1].trim());
+
+          for (Client targetClient: targetClients) {
+            targetClient.out.println(this.username + ": file: " + msg);
+            targetClient.out.flush();
           }
-        } catch (IOException e) {
-          e.printStackTrace();
+
+          byte[] buffer = new byte[BUFFER_SIZE];
+          for (int read = 0, totalRead = 0; totalRead < fileLen; totalRead += read) {
+            if (BUFFER_SIZE < (fileLen - totalRead))
+              read = this.inBin.read(buffer, 0, BUFFER_SIZE);
+            else
+              read = this.inBin.read(buffer, 0, (fileLen - totalRead));
+
+            System.out.println("buffering file");
+            System.out.println(read + ", " + totalRead + File.separator + fileLen);
+            System.out.flush();
+
+            for (Client targetClient: targetClients) {
+              //byte[] bufferCopy = Arrays.copyOf(buffer, buffer.length);
+              targetClient.outBin.write(buffer, 0, read);
+              targetClient.outBin.flush();
+            }
+          }
+          System.out.println("buffering file done");
+          System.out.flush();
+        } else {
+          for (Client targetClient: targetClients) {
+            targetClient.out.println(this.username + ": " + msg);
+            targetClient.out.flush();
+          }
         }
+      } catch (IOException e) {
+        e.printStackTrace();
       }
+
       return true;
     }
 
@@ -195,7 +235,7 @@ public class Server {
       }
 
       this.username = sanitizedUsername;
-      clientMapping.put(this.username, this.sock);
+      clientMapping.put(this.username, this.client);
       this.loggedIn = true;
       out.println("Logged in using username:" + this.username);
       out.flush();
@@ -203,18 +243,18 @@ public class Server {
       return true;
     }
 
-    private ArrayList<Socket> getClientSocks(ArrayList<String> usernames) {
+    private ArrayList<Client> getClients(ArrayList<String> usernames) {
       if (usernames.size() == 0) {
-        return new ArrayList<Socket>(this.clientMapping.values());
+        return new ArrayList<Client>(this.clientMapping.values());
       } else {
-        ArrayList<Socket> clientSocks = new ArrayList<Socket>();
+        ArrayList<Client> clients = new ArrayList<Client>();
         for (String username: usernames) {
-          Socket userSock = this.clientMapping.get(username);
-          if (userSock != null) {
-            clientSocks.add(userSock);
+          Client userClient = this.clientMapping.get(username);
+          if (userClient != null) {
+            clients.add(userClient);
           }
         }
-        return clientSocks;
+        return clients;
       }
     }
 
@@ -249,7 +289,7 @@ public class Server {
   }
 
   public Server() {
-    this.clientMapping = new ConcurrentHashMap<String, Socket>();
+    this.clientMapping = new ConcurrentHashMap<String, Client>();
   }
 
   public void serveForever() {

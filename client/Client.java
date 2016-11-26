@@ -16,17 +16,17 @@ import java.net.Socket;
 
 public class Client {
   private static final int SERVER_PORT = 8080;
-  private static final int BUFFER_SIZE = 4096;
+  private static final int BUFFER_SIZE = 16 * 1000;
 
   private String username;
+  private File userDir;
   private Socket sock;
 
   private PrintWriter out;
   private BufferedReader in;
-  private BufferedInputStream inBin;
   private BufferedOutputStream outBin;
 
-  private Thread dumper;
+  private Dumper dumper;
 
   public Client(String proposedUsername, String serverAddr) {
     String connectionStr = "CONNECT: " + proposedUsername;
@@ -36,13 +36,10 @@ public class Client {
 
       InputStreamReader is = new InputStreamReader(this.sock.getInputStream());
       this.in = new BufferedReader(is);
-      this.inBin = new BufferedInputStream(this.sock.getInputStream());
 
       this.out = new PrintWriter(this.sock.getOutputStream());
       this.outBin = new BufferedOutputStream(this.sock.getOutputStream());
 
-      this.dumper = new Thread(new Dumper(this.in, this.inBin));
-      this.dumper.start();
     } catch (UnknownHostException e) {
       e.printStackTrace();
     } catch (IOException e) {
@@ -53,10 +50,23 @@ public class Client {
       this.out.println(connectionStr);
       this.out.flush();
       String ret = this.in.readLine();
-      if (ret.startsWith("Logged in")) {
+      if (ret.trim().startsWith("Logged")) {
         this.username = ret.split(":", 2)[1];
+        this.userDir = new File(System.getProperty("user.home") + File.separator
+                                + this.username);
+        if (!this.userDir.exists()) {
+          this.userDir.mkdir();
+        }
+
+        this.dumper = new Dumper(this.in,
+                                 new BufferedInputStream(this.sock.getInputStream()),
+                                 this.userDir);
+        Thread dThread = new Thread(this.dumper);
+        dThread.start();
+      } else {
+        System.out.println(ret);
+        System.exit(0);
       }
-      System.out.println(ret);
     } catch (IOException e) {
       e.printStackTrace();
     }
@@ -65,10 +75,12 @@ public class Client {
   private class Dumper implements Runnable {
     private BufferedReader in;
     private BufferedInputStream inBin;
+    private File userDir;
 
-    public Dumper(BufferedReader in, BufferedInputStream inBin) {
+    public Dumper(BufferedReader in, BufferedInputStream inBin, File userDir) {
       this.in = in;
       this.inBin = inBin;
+      this.userDir = userDir;
     }
 
     @Override
@@ -79,19 +91,37 @@ public class Client {
         while ((res = in.readLine()) != null) {
           if (res.contains("file:")) {
             String[] resList = res.split(": ?", 2);
-            String filePath = resList[1].split(": ?", 2)[1];
+            String fileProp = resList[1].split(": ?", 2)[1];
+
+            String[] pathList = fileProp.split(", ?")[0].trim().split(File.separator);
+            String filePath = (this.userDir.getAbsolutePath() + File.separator +
+                               pathList[pathList.length - 1]);
+            int fileLen = Integer.parseInt(fileProp.split(", ?")[1].split(":")[1].trim());
+
             System.out.println("Incoming file " + filePath + " from user " + resList[0]);
+            System.out.println("file len" + fileLen);
+            System.out.flush();
             /* TODO: make user directories */
             File newFile = new File(filePath);
             byte[] buffer = new byte[BUFFER_SIZE];
+
             BufferedOutputStream outStream =
               new BufferedOutputStream(new FileOutputStream(newFile));
-            for (int read = this.inBin.read(buffer);
-                 read >= 0;
-                 read = this.inBin.read(buffer)) {
+            for (int read = 0, totalRead = 0; totalRead < fileLen; totalRead += read) {
+              if (BUFFER_SIZE < (fileLen - totalRead))
+                read = this.inBin.read(buffer, 0, BUFFER_SIZE);
+              else
+                read = this.inBin.read(buffer, 0, (fileLen - totalRead));
+
+              System.out.println("chunk got");
+              System.out.println(read + " " + totalRead + " " + fileLen);
+              System.out.flush();
               outStream.write(buffer, 0, read);
             }
             System.out.println("File saved at " + newFile.getAbsolutePath());
+            System.out.flush();
+
+            outStream.close();
           } else {
             System.out.println(res);
             System.out.flush();
@@ -110,7 +140,8 @@ public class Client {
         if (inp.contains("file:")) {
           String filePath = inp.split(": ?", 2)[1].split(": ?", 2)[1];
           File inpFile = new File(filePath);
-          if (inpFile.exists()) {
+          if (inpFile.exists() && inpFile.isFile()) {
+            inp = inp + ", length: " + inpFile.length();
             this.out.println(inp);
             this.out.flush();
 
@@ -120,9 +151,9 @@ public class Client {
 
             byte[] buffer = new byte[BUFFER_SIZE];
             for (int read = bis.read(buffer); read >= 0; read = bis.read(buffer)) {
-              this.outBin.write(buffer);
+              this.outBin.write(buffer, 0, read);
+              this.outBin.flush();
             }
-            this.outBin.flush();
             System.out.println("Transfer finished");
           } else if (inpFile.isDirectory()) {
             System.out.println("Directory not supported: " + inpFile.getAbsolutePath());
@@ -140,7 +171,6 @@ public class Client {
       try {
         this.in.close();
         this.out.close();
-        this.inBin.close();
         this.outBin.close();
         this.sock.close();
       } catch (IOException e) {
