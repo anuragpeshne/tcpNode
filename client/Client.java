@@ -16,7 +16,7 @@ import java.net.Socket;
 
 public class Client {
   private static final int SERVER_PORT = 8080;
-  private static final int BUFFER_SIZE = 16 * 1000;
+  private static final int BUFFER_SIZE = 16 * 1000 * 1000;
 
   private String username;
   private File userDir;
@@ -93,7 +93,7 @@ public class Client {
             String[] resList = res.split(": ?", 2);
             String fileProp = resList[1].split(": ?", 2)[1];
 
-            String[] pathList = fileProp.split(", ?")[0].trim().split(File.separator);
+            String[] pathList = fileProp.split(", ?")[0].trim().split("\\" + File.separator);
             String filePath = (this.userDir.getAbsolutePath() + File.separator +
                                pathList[pathList.length - 1]);
             int fileLen = Integer.parseInt(fileProp.split(", ?")[1].split(":")[1].trim());
